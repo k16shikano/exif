@@ -1,0 +1,6 @@
+[package]
+name = "exif"
+version = "0.1.0"
+authors = ["Keiichiro Shikano <k16.shikano@gmail.com>"]
+
+[dependencies]
