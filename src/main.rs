@@ -26,13 +26,13 @@ fn main() {
     println!("{:?}", String::from_utf8(data_slice.to_vec()));
 }
 
-trait U8Buf {
+trait EXIF {
     fn addr_of_header (&self, &[u8]) -> Option<usize>;
     fn data_len (&self, &[u8]) -> Option<usize>;
     fn tag_data (&self, usize, &[u8]) -> Option<&[u8]>;
 }
 
-impl U8Buf for [u8] {
+impl EXIF for [u8] {
 
     fn addr_of_header (&self, s: &[u8]) -> Option<usize> {
         self.windows(s.len()).position(|window| window == s)
