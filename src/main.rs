@@ -74,7 +74,7 @@ impl EXIF for [u8] {
 }
 
 fn u8array_integer (b: &[u8]) -> usize {
-    b.into_iter()
+    b.iter()
         .enumerate()
         .fold(0, |s, (i,a)| s + (*a as usize * 2usize.pow(8*i as u32)))
 }
