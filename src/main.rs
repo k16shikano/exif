@@ -17,33 +17,50 @@ fn main() {
     reader.read_to_end(&mut vec).unwrap();
     let buf : &[u8] = &vec;
     
-    let tiff_header = &[0x49u8, 0x49u8, 0x2Au8, 0x00u8, 0x08u8, 0x00u8, 0x00u8, 0x00u8];
-    let p = buf.addr_of_header(tiff_header).unwrap();
+    let tiff_header_ii = &[0x49u8, 0x49u8, 0x2Au8, 0x00u8, 0x08u8, 0x00u8, 0x00u8, 0x00u8];
+    let tiff_header_mm = &[0x4Du8, 0x4Du8, 0x00u8, 0x2Au8, 0x00u8, 0x00u8, 0x00u8, 0x08u8];
+    let (p, byte_order) = 
+      match buf.addr_of_header(tiff_header_ii) {
+        None => match buf.addr_of_header(tiff_header_mm) {
+                  None => panic!("Could not find EXIF data."),
+                  Some(mm) => (mm, ByteOrder::MM)
+                },
+        Some(ii) => (ii, ByteOrder::II)
+      };
 
-    let tag = resolve_ifd0(&tagname).expect("no tag name");
-    let data_slice = buf.tag_data(p,&tag).expect("the file has no date for the tag");
-
-    println!("{:?}", String::from_utf8(data_slice.to_vec()));
+    let tag = resolve_ifd0(&tagname, &byte_order).expect("no tag name");
+    
+    if let Some(data_slice) = buf.tag_data(p, &tag, &byte_order){
+      if let Ok(result) = String::from_utf8(data_slice.to_vec()){
+        println!("{}: {}", tagname, result);
+      } else {
+        println!("{} data not found.", tagname);
+      }
+    } else {
+      println!("No {} tag.", tagname);
+    }
 }
 
+enum ByteOrder { II, MM }
+
 trait EXIF {
-    fn addr_of_header (&self, &[u8]) -> Option<usize>;
-    fn data_len (&self, &[u8]) -> Option<usize>;
-    fn tag_data (&self, usize, &[u8]) -> Option<&[u8]>;
+    fn addr_of_header (&self, _: &[u8]) -> Option<usize>;
+    fn data_len (&self, _: &[u8], _: &ByteOrder) -> Option<usize>;
+    fn tag_data (&self, _: usize, _: &[u8], _: &ByteOrder) -> Option<&[u8]>;
 }
 
 impl EXIF for [u8] {
 
     fn addr_of_header (&self, s: &[u8]) -> Option<usize> {
-        self.windows(s.len()).position(|window| window == s)
+        return self.windows(s.len()).position(|window| window == s);
     }
 
-    fn data_len (&self, s: &[u8]) -> Option<usize> {
+    fn data_len (&self, s: &[u8], o: &ByteOrder) -> Option<usize> {
         match self.addr_of_header(s) {
             Some(h) => {
                 // self[h+2] as usize + (self[h+3] as usize * 256);
-                let t: usize = u8array_integer(self.windows(2).nth(h+2).unwrap());
-                let len: usize = u8array_integer(self.windows(4).nth(h+4).unwrap());
+                let t: usize = u8array_integer(self.windows(2).nth(h+2).unwrap(), o);
+                let len: usize = u8array_integer(self.windows(4).nth(h+4).unwrap(), o);
 
                 let total = match t {
                     1 | 2 | 6 | 7 => len * 1,
@@ -58,11 +75,11 @@ impl EXIF for [u8] {
         }
     }
 
-    fn tag_data (&self, offset: usize, s: &[u8]) -> Option<&[u8]> {
+    fn tag_data (&self, offset: usize, s: &[u8], o: &ByteOrder) -> Option<&[u8]> {
         match self.addr_of_header(s) {
             Some(h) => {
-                let start_addr: usize = offset + u8array_integer(self.windows(2).nth(h+8).unwrap());
-                let end_addr: usize = match self.data_len(s) {
+                let start_addr: usize = offset + u8array_integer(self.windows(4).nth(h+8).unwrap(), o);
+                let end_addr: usize = match self.data_len(s, o) {
                     Some(len) => start_addr + len,
                     None => offset + start_addr
                 };
@@ -73,10 +90,15 @@ impl EXIF for [u8] {
     }
 }
 
-fn u8array_integer (b: &[u8]) -> usize {
-    b.iter()
-        .enumerate()
+fn u8array_integer (b: &[u8], o: &ByteOrder) -> usize {
+  match o {
+    ByteOrder::II => 
+      b.iter().enumerate()
+        .fold(0, |s, (i,a)| s + (*a as usize * 2usize.pow(8*i as u32))),
+    ByteOrder::MM => 
+      b.iter().rev().enumerate()
         .fold(0, |s, (i,a)| s + (*a as usize * 2usize.pow(8*i as u32)))
+  }
 }
 
 lazy_static! {
@@ -102,10 +124,13 @@ lazy_static! {
     };
 }
     
-fn resolve_ifd0 (key: &str) -> Option<[u8;2]> {
+fn resolve_ifd0 (key: &str, o: &ByteOrder) -> Option<[u8;2]> {
     match IFD0_TAGS.get(key) {
-        Some(header) => {let mut h = header.clone(); h.reverse(); Some(h)},
+        Some(header) => 
+          match o {
+            ByteOrder::II => {let mut h = header.clone(); h.reverse(); Some(h)},
+            ByteOrder::MM => Some(*header)
+          },
         None => None
     }
 }
-        
